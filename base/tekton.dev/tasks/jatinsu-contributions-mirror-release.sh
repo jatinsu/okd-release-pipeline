@@ -40,12 +40,9 @@ FILTERED_RELEASES=$(echo -e "$PREV_RELEASES\n$CURRENT_RELEASES" | grep -v '^$')
 # Convert the filtered releases to a comma-separated string
 PREVIOUS_RELEASES=$(echo "$FILTERED_RELEASES" | tr '\n' ',' | sed 's/,$//')
 
-# Build the previous releases flag if there are any valid previous releases
-PREVIOUS_FLAG=()
-if [[ -n "$PREVIOUS_RELEASES" ]] && echo "$PREVIOUS_RELEASES" | grep -q ','; then
-  PREVIOUS_FLAG=(--previous="$PREVIOUS_RELEASES")
-else
-  echo "No valid previous releases found, skipping --previous flag"
+# check if the filtered releases is empty or it's not a valid comma-separated string
+if ! echo "$PREVIOUS_RELEASES" | grep -q ','; then
+  echo "PREVIOUS_RELEASES is not a valid comma-separated string"
 fi
 
 echo "Previous releases for --previous flag:"
