@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: okd-release-promoter
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: okd-graph-pr-bot
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: okd-graph-pr-launcher
+rules:
+  - apiGroups: ["tekton.dev"]
+    resources: ["pipelineruns"]
+    verbs: ["get", "create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: okd-graph-pr-launcher
+subjects:
+  - kind: ServiceAccount
+    name: okd-release-promoter
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: okd-graph-pr-launcher

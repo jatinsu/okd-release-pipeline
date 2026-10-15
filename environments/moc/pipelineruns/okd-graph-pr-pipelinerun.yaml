@@ -1,0 +1,25 @@
+# Edit release-name and target-release-stream before creating this graph-only rerun.
+apiVersion: tekton.dev/v1beta1
+kind: PipelineRun
+metadata:
+  generateName: okd-graph-pr-retry-
+  labels:
+    app.kubernetes.io/name: okd-graph-pr
+spec:
+  serviceAccountName: okd-graph-pr-bot
+  pipelineRef:
+    name: okd-graph-pr-pipeline
+  timeouts:
+    pipeline: 49h0m0s
+    tasks: 48h55m0s
+    finally: 5m0s
+  taskRunSpecs:
+    - pipelineTaskName: propose-graph-update
+      timeout: 48h55m0s
+  params:
+    - name: release-name
+      value: REPLACE_WITH_PROMOTED_RELEASE
+    - name: target-release-stream
+      value: 5-scos-stable
+    - name: source-pipelinerun
+      value: graph-only-rerun

@@ -49,6 +49,46 @@ spec:
       description: kubernetes secret containing the token to post messages
       type: string
       default: "okd-matrix-bot-auth"
+    - name: enable-graph-pr
+      description: Launch an independent graph-data PR PipelineRun after tagging the release
+      type: string
+      default: "false"
+    - name: graph-data-repository
+      type: string
+      description: Graph-data GitHub repository
+      default: "okd-project/cincinnati-graph-data"
+    - name: graph-data-base-branch
+      type: string
+      description: Graph-data PR base branch
+      default: "main"
+    - name: graph-release-controller
+      type: string
+      description: Controller used to check the promoted release
+      default: "https://amd64.origin.releases.ci.openshift.org"
+    - name: graph-acceptance-timeout-seconds
+      type: string
+      description: Maximum acceptance wait in seconds
+      default: "172800"
+    - name: graph-poll-interval-seconds
+      type: string
+      description: Acceptance polling interval in seconds
+      default: "60"
+    - name: graph-pr-image
+      type: string
+      description: Image built from graph-pr-bot/Containerfile
+      default: "quay.io/okd/graph-pr-bot:latest"
+    - name: graph-github-app-id
+      type: string
+      description: GitHub App ID for graph-data PRs
+      default: "309584"
+    - name: graph-github-app-installation-id
+      type: string
+      description: GitHub App installation with graph-data access
+      default: "35633111"
+    - name: graph-githubapp-secret-name
+      type: string
+      description: Secret containing githubapp-private-key
+      default: "okd-githubapp-auth"
   tasks:
     - name: pick-release
       taskRef:
@@ -176,6 +216,48 @@ spec:
           value: okd-prow-sa-auth
       runAfter:
         - create-github-release
+    - name: launch-graph-pr
+      taskRef:
+        name: launch-graph-pr
+      runAfter:
+        - update-release-channel
+      when:
+        - input: $(params.enable-graph-pr)
+          operator: in
+          values: ["true"]
+      params:
+        - name: release-name
+          value: $(tasks.pick-target-release-name.results.target-release-name)
+        - name: target-release-stream
+          value: $(params.target-release-stream)
+        - name: source-pipelinerun
+          value: $(context.pipelineRun.name)
+        - name: graph-data-repository
+          value: $(params.graph-data-repository)
+        - name: graph-data-base-branch
+          value: $(params.graph-data-base-branch)
+        - name: graph-release-controller
+          value: $(params.graph-release-controller)
+        - name: graph-acceptance-timeout-seconds
+          value: $(params.graph-acceptance-timeout-seconds)
+        - name: graph-poll-interval-seconds
+          value: $(params.graph-poll-interval-seconds)
+        - name: graph-pr-image
+          value: $(params.graph-pr-image)
+        - name: graph-github-app-id
+          value: $(params.graph-github-app-id)
+        - name: graph-github-app-installation-id
+          value: $(params.graph-github-app-installation-id)
+        - name: graph-githubapp-secret-name
+          value: $(params.graph-githubapp-secret-name)
+        - name: enable-notifications
+          value: $(params.enable-notifications)
+        - name: matrix-room
+          value: $(params.matrix-room)
+        - name: matrix-endpoint
+          value: $(params.matrix-endpoint)
+        - name: matrix-secret
+          value: $(params.matrix-secret)
   finally:
     - name: notify-matrix
       params:

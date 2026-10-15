@@ -1,0 +1,175 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: launch-graph-pr
+spec:
+  params:
+    - name: release-name
+      type: string
+      description: Exact promoted release name
+    - name: target-release-stream
+      type: string
+      description: Promoted release stream, such as 5-scos-stable or 5-scos-next
+    - name: source-pipelinerun
+      type: string
+      description: Promotion PipelineRun that launched this follow-up
+    - name: graph-data-repository
+      type: string
+      description: Graph-data GitHub repository
+      default: "okd-project/cincinnati-graph-data"
+    - name: graph-data-base-branch
+      type: string
+      description: Graph-data PR base branch
+      default: "main"
+    - name: graph-release-controller
+      type: string
+      description: Controller used to check the promoted release
+      default: "https://amd64.origin.releases.ci.openshift.org"
+    - name: graph-acceptance-timeout-seconds
+      type: string
+      description: Maximum acceptance wait in seconds
+      default: "172800"
+    - name: graph-poll-interval-seconds
+      type: string
+      description: Acceptance polling interval in seconds
+      default: "60"
+    - name: graph-pr-image
+      type: string
+      description: Image built from graph-pr-bot/Containerfile
+      default: "quay.io/okd/graph-pr-bot:latest"
+    - name: graph-github-app-id
+      type: string
+      description: GitHub App ID for graph-data PRs
+      default: "309584"
+    - name: graph-github-app-installation-id
+      type: string
+      description: GitHub App installation with graph-data access
+      default: "35633111"
+    - name: graph-githubapp-secret-name
+      type: string
+      description: Secret containing githubapp-private-key
+      default: "okd-githubapp-auth"
+    - name: enable-notifications
+      type: string
+      description: Enable Matrix notifications
+      default: "false"
+    - name: matrix-room
+      type: string
+      description: Matrix room
+      default: "!nStsazaBvZCZQHPWTY:fedoraproject.org"
+    - name: matrix-endpoint
+      type: string
+      description: Matrix endpoint
+      default: "matrix.org"
+    - name: matrix-secret
+      type: string
+      description: Secret containing the Matrix token
+      default: "okd-matrix-bot-auth"
+  results:
+    - name: graph-pipelinerun-name
+      description: Independent follow-up PipelineRun
+  steps:
+    - name: launch
+      image: quay.io/okd/tekton-worker:latest
+      env:
+        - name: RELEASE_NAME
+          value: $(params.release-name)
+        - name: TARGET_RELEASE_STREAM
+          value: $(params.target-release-stream)
+        - name: SOURCE_PIPELINERUN
+          value: $(params.source-pipelinerun)
+        - name: GRAPH_DATA_REPOSITORY
+          value: $(params.graph-data-repository)
+        - name: GRAPH_DATA_BASE_BRANCH
+          value: $(params.graph-data-base-branch)
+        - name: GRAPH_RELEASE_CONTROLLER
+          value: $(params.graph-release-controller)
+        - name: GRAPH_ACCEPTANCE_TIMEOUT_SECONDS
+          value: $(params.graph-acceptance-timeout-seconds)
+        - name: GRAPH_POLL_INTERVAL_SECONDS
+          value: $(params.graph-poll-interval-seconds)
+        - name: GRAPH_PR_IMAGE
+          value: $(params.graph-pr-image)
+        - name: GRAPH_GITHUB_APP_ID
+          value: $(params.graph-github-app-id)
+        - name: GRAPH_GITHUB_APP_INSTALLATION_ID
+          value: $(params.graph-github-app-installation-id)
+        - name: GRAPH_GITHUBAPP_SECRET_NAME
+          value: $(params.graph-githubapp-secret-name)
+        - name: ENABLE_NOTIFICATIONS
+          value: $(params.enable-notifications)
+        - name: MATRIX_ROOM
+          value: $(params.matrix-room)
+        - name: MATRIX_ENDPOINT
+          value: $(params.matrix-endpoint)
+        - name: MATRIX_SECRET
+          value: $(params.matrix-secret)
+        - name: NAMESPACE
+          value: $(context.taskRun.namespace)
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        if [[ ! "$GRAPH_ACCEPTANCE_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]]; then
+          echo "graph-acceptance-timeout-seconds must be a positive integer" >&2
+          exit 1
+        fi
+        # The same promotion retry reuses its follow-up. No ownerReference: removing
+        # the promotion must not terminate an acceptance check still in progress.
+        promotion_id="$(printf '%s' "$SOURCE_PIPELINERUN" | sha256sum | cut -c1-20)"
+        child_name="okd-graph-pr-${promotion_id}"
+        manifest="$(mktemp)"
+        trap 'rm -f "$manifest"' EXIT
+        existing="$(oc get pipelinerun "$child_name" -n "$NAMESPACE" --ignore-not-found -o name)"
+        if [[ -z "$existing" ]]; then
+          jq -n --arg name "$child_name" --arg namespace "$NAMESPACE" --arg id "$promotion_id" '
+            {
+              apiVersion: "tekton.dev/v1beta1",
+              kind: "PipelineRun",
+              metadata: {
+                name: $name, namespace: $namespace,
+                labels: {
+                  "app.kubernetes.io/name": "okd-graph-pr",
+                  "okd.io/promotion-id": $id
+                },
+                annotations: {"okd.io/source-pipelinerun": env.SOURCE_PIPELINERUN}
+              },
+              spec: {
+                serviceAccountName: "okd-graph-pr-bot",
+                pipelineRef: {name: "okd-graph-pr-pipeline"},
+                timeouts: {
+                  pipeline: (((env.GRAPH_ACCEPTANCE_TIMEOUT_SECONDS | tonumber) + 3600 | tostring) + "s"),
+                  tasks: (((env.GRAPH_ACCEPTANCE_TIMEOUT_SECONDS | tonumber) + 3300 | tostring) + "s"),
+                  finally: "300s"
+                },
+                taskRunSpecs: [{
+                  pipelineTaskName: "propose-graph-update",
+                  timeout: (((env.GRAPH_ACCEPTANCE_TIMEOUT_SECONDS | tonumber) + 3300 | tostring) + "s")
+                }],
+                params: [
+                {name: "release-name", value: env.RELEASE_NAME},
+                {name: "target-release-stream", value: env.TARGET_RELEASE_STREAM},
+                {name: "source-pipelinerun", value: env.SOURCE_PIPELINERUN},
+                {name: "graph-data-repository", value: env.GRAPH_DATA_REPOSITORY},
+                {name: "graph-data-base-branch", value: env.GRAPH_DATA_BASE_BRANCH},
+                {name: "graph-release-controller", value: env.GRAPH_RELEASE_CONTROLLER},
+                {name: "graph-acceptance-timeout-seconds", value: env.GRAPH_ACCEPTANCE_TIMEOUT_SECONDS},
+                {name: "graph-poll-interval-seconds", value: env.GRAPH_POLL_INTERVAL_SECONDS},
+                {name: "graph-pr-image", value: env.GRAPH_PR_IMAGE},
+                {name: "graph-github-app-id", value: env.GRAPH_GITHUB_APP_ID},
+                {name: "graph-github-app-installation-id", value: env.GRAPH_GITHUB_APP_INSTALLATION_ID},
+                {name: "graph-githubapp-secret-name", value: env.GRAPH_GITHUBAPP_SECRET_NAME},
+                {name: "enable-notifications", value: env.ENABLE_NOTIFICATIONS},
+                {name: "matrix-room", value: env.MATRIX_ROOM},
+                {name: "matrix-endpoint", value: env.MATRIX_ENDPOINT},
+                {name: "matrix-secret", value: env.MATRIX_SECRET}
+                ]
+              }
+            }' > "$manifest"
+          # Recover if two attempts race to create the same follow-up.
+          if ! oc create -f "$manifest" -n "$NAMESPACE"; then
+            oc get pipelinerun "$child_name" -n "$NAMESPACE" -o name
+          fi
+        fi
+        echo "Graph PR follow-up: $child_name (promotion $SOURCE_PIPELINERUN)"
+        printf '%s' "$child_name" > "$(results.graph-pipelinerun-name.path)"

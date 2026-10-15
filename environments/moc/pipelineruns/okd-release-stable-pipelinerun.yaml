@@ -3,7 +3,10 @@ kind: PipelineRun
 metadata:
   generateName: okd-release-stable-pipelinerun-
 spec:
+  serviceAccountName: okd-release-promoter
   params:
+  - name: enable-graph-pr
+    value: "true"
   - name: content-mirror-pushspec
     value: quay.io/okd/scos-content
   - name: enable-notifications

@@ -1,0 +1,7 @@
+FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
+
+RUN microdnf install -y python3 python3-pyyaml openssl && microdnf clean all
+COPY graph_pr.py /opt/okd-graph-pr/graph_pr.py
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+USER 1001
+ENTRYPOINT ["python3", "/opt/okd-graph-pr/graph_pr.py"]

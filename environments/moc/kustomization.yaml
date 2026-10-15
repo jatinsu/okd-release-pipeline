@@ -3,6 +3,7 @@ kind: Kustomization
 namespace: okd-coreos
 resources:
 - ../../base/core/configmaps/
+- ../../base/core/serviceaccounts/
 - ../../base/core/persistentvolumes/
 - ../../base/core/persistentvolumeclaims/
 - ../../base/storage.k8s.io/storageclasses/

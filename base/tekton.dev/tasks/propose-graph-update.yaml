@@ -1,0 +1,114 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: propose-graph-update
+spec:
+  params:
+    - name: release-name
+      type: string
+      description: Exact promoted release name
+    - name: target-release-stream
+      type: string
+      description: Promoted release stream, such as 5-scos-stable or 5-scos-next
+    - name: source-pipelinerun
+      type: string
+      description: Promotion PipelineRun that launched this follow-up
+    - name: graph-data-repository
+      type: string
+      description: Graph-data GitHub repository
+      default: "okd-project/cincinnati-graph-data"
+    - name: graph-data-base-branch
+      type: string
+      description: Graph-data PR base branch
+      default: "main"
+    - name: graph-release-controller
+      type: string
+      description: Controller used to check the promoted release
+      default: "https://amd64.origin.releases.ci.openshift.org"
+    - name: graph-acceptance-timeout-seconds
+      type: string
+      description: Maximum acceptance wait in seconds
+      default: "172800"
+    - name: graph-poll-interval-seconds
+      type: string
+      description: Acceptance polling interval in seconds
+      default: "60"
+    - name: graph-pr-image
+      type: string
+      description: Image built from graph-pr-bot/Containerfile
+      default: "quay.io/okd/graph-pr-bot:latest"
+    - name: graph-github-app-id
+      type: string
+      description: GitHub App ID for graph-data PRs
+      default: "309584"
+    - name: graph-github-app-installation-id
+      type: string
+      description: GitHub App installation with graph-data access
+      default: "35633111"
+    - name: graph-githubapp-secret-name
+      type: string
+      description: Secret containing githubapp-private-key
+      default: "okd-githubapp-auth"
+  results:
+    - name: pull-request-url
+      description: Existing or newly created PR URL; empty for a successful no-op
+  steps:
+    - name: wait-for-acceptance
+      image: $(params.graph-pr-image)
+      command: ["python3", "/opt/okd-graph-pr/graph_pr.py"]
+      args:
+        - wait
+        - --release-name
+        - $(params.release-name)
+        - --release-stream
+        - $(params.target-release-stream)
+        - --release-controller
+        - $(params.graph-release-controller)
+        - --timeout-seconds
+        - $(params.graph-acceptance-timeout-seconds)
+        - --poll-seconds
+        - $(params.graph-poll-interval-seconds)
+      resources:
+        requests:
+          cpu: 10m
+          memory: 64Mi
+    - name: create-graph-pr
+      image: $(params.graph-pr-image)
+      command: ["python3", "/opt/okd-graph-pr/graph_pr.py"]
+      args:
+        - propose
+        - --release-name
+        - $(params.release-name)
+        - --release-stream
+        - $(params.target-release-stream)
+        - --release-controller
+        - $(params.graph-release-controller)
+        - --repository
+        - $(params.graph-data-repository)
+        - --base-branch
+        - $(params.graph-data-base-branch)
+        - --source-pipelinerun
+        - $(params.source-pipelinerun)
+        - --app-id
+        - $(params.graph-github-app-id)
+        - --installation-id
+        - $(params.graph-github-app-installation-id)
+        - --private-key-file
+        - /secret/githubapp/githubapp-private-key
+        - --result-file
+        - $(results.pull-request-url.path)
+      volumeMounts:
+        - name: githubapp
+          mountPath: /secret/githubapp
+          readOnly: true
+      resources:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+  volumes:
+    - name: githubapp
+      secret:
+        secretName: $(params.graph-githubapp-secret-name)
+        items:
+          - key: githubapp-private-key
+            path: githubapp-private-key
