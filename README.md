@@ -10,6 +10,7 @@
 * `okd-prow-sa-auth`
   * contains key `token`, which is a Service Account token for the Prow CI cluster, with permissions to tag release images. This token comes from the secret (sa-image-tagger-token-chsw6) stored in the app.ci cluster on the origin project.
 * `okd-matrix-bot-auth`, which contains an access token for Matrix (under key `token`)
+* `okd-graph-data-bot-token`, which contains a GitHub token for the bot account that opens [cincinnati-graph-data](https://github.com/okd-project/cincinnati-graph-data) PRs (under key `token`). A classic token with the `public_repo` scope is enough: the bot pushes to its own fork of the repository (created on first use) and opens PRs from it.
 
 2. Apply:
 ```bash
@@ -28,6 +29,32 @@ Example for 4.next release:
 ```bash
 oc create -f environments/moc/pipelineruns/okd-release-next-pipelinerun.yaml
 
+```
+
+## Cincinnati graph-data PRs
+When `enable-graph-update` is `"true"` (as in the `moc` PipelineRuns), the release pipeline finishes by starting an
+`okd-graph-update-pipeline` run for the promoted release. Because acceptance can take hours, this runs as its own
+PipelineRun, so the release pipeline still finishes and sends its notification on time:
+
+1. `wait-for-release-acceptance` polls the release controller until the release is `Accepted` in its target stream
+   (e.g. `5-scos-stable`). If the release is `Rejected`, or is not accepted within 12h, the run fails and no PR is opened.
+2. `propose-graph-update` adds the release to every channel in cincinnati-graph-data whose `feeder.name` matches the
+   stream (`*-scos-stable` → `stable`, `*-scos-next` → `candidate`) and whose `feeder.filter` matches the release. It
+   makes one commit per channel and opens an `Enable <release> in <feeder> channels` PR. If no channel matches (e.g. the
+   first release of a new minor), it fails rather than creating a channel.
+
+`propose-graph-update` needs `yq` and `git` in `quay.io/okd/tekton-worker`; rebuild and push the image from
+[tekton-worker-image](tekton-worker-image/) before enabling this.
+
+```bash
+# Follow the graph-data runs started by a release pipeline
+oc get pipelineruns -n okd-coreos -l okd.io/parent-pipelinerun=<release-pipelinerun-name>
+
+# Propose a graph update for an already accepted release, by hand (dry-run=true only prints the diff)
+tkn pipeline start okd-graph-update-pipeline -n okd-coreos \
+  --param release-name=5.0.0-okd-scos.2 \
+  --param target-release-stream=5-scos-stable \
+  --param dry-run=true
 ```
 
 ## Annex - running a task individually
